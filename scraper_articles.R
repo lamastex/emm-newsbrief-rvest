@@ -22,8 +22,13 @@
 library(magrittr)
 library(tidyverse)
 library(rvest)
+library(fs)
 
-template <- function(i, from, to, language="all", page.language="en")
+DATE <- "2020-05-01"
+LANGUAGE <- "sv"
+BASE_OUTPUT_PATH <- "/tmp"
+
+emm.url.template <- function(i, from, to=from, language="all", page.language="en")
   str_c("https://emm.newsbrief.eu/NewsBrief/dynamic",
         "?language=", page.language,
         "&page=", i,
@@ -31,6 +36,21 @@ template <- function(i, from, to, language="all", page.language="en")
         "&dateFrom=", from,
         "&dateTo=", to,
         "&lang=", language)
+
+general.file.template <- function(type, i, from, to=from, language="all") {
+  date_block <- if(from == to) from else str_c(from, "--", to)
+  file_name <- str_c(type, "-", language, "-", date_block, "-", curr_page, ".csv.gz")
+  fs::path(BASE_OUTPUT_PATH, file_name)
+}
+
+articles.file.template <- function(i, from, to=from, language="all")
+  general.file.template("articles", i, from, to, language)
+
+entities.file.template <- function(i, from, to=from, language="all")
+  general.file.template("entities", i, from, to, language)
+
+categories.file.template <- function(i, from, to=from, language="all")
+  general.file.template("categories", i, from, to, language)
 
 get_page_count <- function(doc)
   doc %>%
@@ -126,13 +146,15 @@ parse_page <- function(doc) {
   list(articles=articles, entities=entities, categories=categories)
 }
 
-dump_parsed <- function(parse_results) {
-  write_csv(parse_results$articles, str_c("/tmp/articles-sv-2020-05-01-", curr_page, ".csv.gz"))
-  write_csv(parse_results$entities, str_c("/tmp/entitites-sv-2020-05-01-", curr_page, ".csv.gz"))
-  write_csv(parse_results$categories, str_c("/tmp/categories-sv-2020-05-01-", curr_page, ".csv.gz"))
+dump_parsed <- function(i, parse_results) {
+  write_csv(parse_results$articles,
+            articles.file.template(i, DATE, language=LANGUAGE))
+  write_csv(parse_results$entities,
+            entities.file.template(i, DATE, language=LANGUAGE))
+  write_csv(parse_results$categories, categories.file.template(i, DATE))
 }
 
-page <- read_html(template(1, "2020-05-01", "2020-05-01", language="sv"))
+page <- read_html(emm.url.template(1, DATE, language=LANGUAGE))
 
 ## Theory:
 ## page_count ==  0 if no search results
@@ -142,21 +164,24 @@ page <- read_html(template(1, "2020-05-01", "2020-05-01", language="sv"))
 page_count <- get_page_count(page)
 curr_page <- get_current_page(page)
 
-max_page_count <- 200
+max_page_count <- 500
 
 if(page_count != 0) {
-  dump_parsed(parse_page(page))
+  print(curr_page)
+  dump_parsed(curr_page, parse_page(page))
 } else {
   warning("No search results!")
 }
 
 while(page_count == -1 && curr_page <= max_page_count) {
-  page <- read_html(template(curr_page + 1, "2020-05-01", "2020-05-01"))
-  ## print(curr_page + 1)
+  page <- read_html(emm.url.template(curr_page + 1, DATE, language=LANGUAGE))
+  print(curr_page + 1)
   page_count <- get_page_count(page)
   curr_page <- get_current_page(page)
   ##
-  dump_parsed(parse_page(page))
+  dump_parsed(curr_page, parse_page(page))
 }
 
+
 ## search_page <- read_html("https://emm.newsbrief.eu/NewsBrief/search/en/advanced.html")
+
