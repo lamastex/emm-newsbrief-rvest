@@ -24,16 +24,25 @@ library(tidyverse)
 library(rvest)
 library(fs)
 
-rss <- read_xml("https://emm.newsbrief.eu/rss/rss?language=sv&type=search&mode=advanced&dateto=2020-05-05T11%3A59%3A59Z&country=SE&datefrom=2020-05-05T11%3A50%3A00Z")
+LANGUAGE  <- "en"
+COUNTRY   <- "US"
+DATE_FROM <- URLencode("2020-05-05T11:59:00Z")
+DATE_TO   <- URLencode("2020-05-05T11:59:59Z")
+
+rss <- read_xml(str_c("https://emm.newsbrief.eu/rss/rss",
+                      "?language=", LANGUAGE,
+                      "&type=search&mode=advanced",
+                      "&dateto=", DATE_TO,
+                      "&country=", COUNTRY,
+                      "&datefrom=", DATE_FROM))
 
 rss.channel <- rss %>% xml_node(xpath="/rss/channel")
 
-rss.title <- rss.channel %>% xml_node(xpath="./title") %>% xml_text()
-rss.url <- rss.channel %>% xml_node(xpath="./link") %>% xml_text()
+rss.title       <- rss.channel %>% xml_node(xpath="./title")       %>% xml_text()
+rss.url         <- rss.channel %>% xml_node(xpath="./link")        %>% xml_text()
 rss.description <- rss.channel %>% xml_node(xpath="./description") %>% xml_text()
 
-
-rss.item.nodes <- rss.channel %>% xml_nodes(xpath="./item")
+rss.item.nodes  <- rss.channel %>% xml_nodes(xpath="./item")
 
 get_text <- function(field)
   rss.item.nodes %>% xml_node(xpath=str_c("./", field)) %>% xml_text()
@@ -41,26 +50,42 @@ get_text <- function(field)
 get_attr <- function(field, attr)
   rss.item.nodes %>% xml_node(xpath=str_c("./", field)) %>% xml_attr(attr),
 
-items <- tibble(title       = get_text("title"),
-                link        = get_text("link"),
-                description = get_text("description"),
-                pubDate     = get_text("pubDate"),
-                guid        = get_text("guid"),
-                isPermaLink = get_attr("guid", "isPermaLink"),
-                source.text = get_text("source"),
-                source.url  = get_attr("source", "url"),
-                language    = get_text("iso:language"),
-                point       = get_text("georss:point"),
-                bns.text    = get_text("emm:bns"),
-                bns.level   = get_attr("emm:bns", "level"))
+items <- tibble(title             = get_text("title"),
+                link              = get_text("link"),
+                description       = get_text("description"),
+                pubDate           = get_text("pubDate"),
+                guid              = get_text("guid"),
+                isPermaLink       = get_attr("guid",          "isPermaLink"),
+                source.text       = get_text("source"),
+                source.url        = get_attr("source",        "url"),
+                language          = get_text("iso:language"),
+                point             = get_text("georss:point"),
+                bns.text          = get_text("emm:bns"),
+                bns.level         = get_attr("emm:bns",       "level"),
+                title_trans       = get_text("emm:title"),
+                description_trans = get_text("emm:description"))
 
 parse_entities <- function(node) {
-  entity.nodes <- node %>% xml_nodes(., xpath="./emm:entity")
-  tibble(id = entity.nodes %>% xml_attr("id") %>% as.integer(),
+  entity.nodes <- node %>%
+    xml_nodes(xpath="./emm:entity")
+  tibble(  id = entity.nodes %>% xml_attr("id") %>% as.integer(),
          name = entity.nodes %>% xml_attr("name"),
          text = entity.nodes %>% xml_text())
 }
 
-entities <- tibble(guid = items$guid,
-                   entities = map(rss.item.nodes, parse_entities)) %>%
+parse_categories <- function(node) {
+  node %>%
+    xml_nodes(xpath="./category") %>%
+    xml_text() %>%
+    enframe(NULL, "category")
+}
+
+entities <-
+  tibble(guid = items$guid,
+         entities = map(rss.item.nodes, parse_entities)) %>%
   unnest(entities)
+
+categories <-
+  tibble(guid = items$guid,
+         categories = map(rss.item.nodes, parse_categories)) %>%
+  unnest(categories)
