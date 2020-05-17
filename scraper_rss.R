@@ -112,10 +112,10 @@ general.file.template <- function(type) {
   fs::path(BASE_OUTPUT_PATH, file_name)
 }
 
-articles.file.template <- general.file.template("articles")
-entities.file.template <- general.file.template("entities")
+articles.file.template   <- general.file.template("articles")
+entities.file.template   <- general.file.template("entities")
 categories.file.template <- general.file.template("categories")
 
-write_csv(items, path=articles.file.template)
-write_csv(entities, path=entities.file.template)
+write_csv(     items, path=articles.file.template)
+write_csv(  entities, path=entities.file.template)
 write_csv(categories, path=categories.file.template)
