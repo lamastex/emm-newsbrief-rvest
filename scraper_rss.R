@@ -26,15 +26,29 @@ library(fs)
 
 LANGUAGE  <- "en"
 COUNTRY   <- "US"
-DATE_FROM <- URLencode("2020-05-05T11:59:00Z")
-DATE_TO   <- URLencode("2020-05-05T11:59:59Z")
 
+DATE_FROM <- "2020-05-05"
+DATE_TO   <- "2020-05-05"
+
+TIME_FROM <- "11:58:00"
+TIME_TO   <- "11:58:59"
+
+BASE_OUTPUT_PATH <- "/tmp"
+
+DATE_TIME_FROM <- str_c(DATE_FROM, "T", TIME_FROM, "Z")
+DATE_TIME_TO   <- str_c(  DATE_TO, "T",   TIME_TO, "Z")
+
+#####
+## Actual parsing code
+#####
+
+## Truncates at 100 items
 rss <- read_xml(str_c("https://emm.newsbrief.eu/rss/rss",
                       "?language=", LANGUAGE,
                       "&type=search&mode=advanced",
-                      "&dateto=", DATE_TO,
+                      "&dateto=", URLencode(DATE_TIME_TO),
                       "&country=", COUNTRY,
-                      "&datefrom=", DATE_FROM))
+                      "&datefrom=", URLencode(DATE_TIME_FROM)))
 
 rss.channel <- rss %>% xml_node(xpath="/rss/channel")
 
@@ -89,3 +103,19 @@ categories <-
   tibble(guid = items$guid,
          categories = map(rss.item.nodes, parse_categories)) %>%
   unnest(categories)
+
+#####
+## Output related stuff
+#####
+general.file.template <- function(type) {
+  file_name <- str_c(type, "-", COUNTRY, "-", LANGUAGE, "-", DATE_TIME_FROM, "--", DATE_TIME_TO, ".csv.gz")
+  fs::path(BASE_OUTPUT_PATH, file_name)
+}
+
+articles.file.template <- general.file.template("articles")
+entities.file.template <- general.file.template("entities")
+categories.file.template <- general.file.template("categories")
+
+write_csv(items, path=articles.file.template)
+write_csv(entities, path=entities.file.template)
+write_csv(categories, path=categories.file.template)

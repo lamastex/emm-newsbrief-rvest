@@ -19,15 +19,22 @@
 ## OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 ## SOFTWARE.
 
-library(magrittr)
-library(tidyverse)
-library(rvest)
-library(fs)
+suppressMessages(library(magrittr))
+suppressMessages(library(tidyverse))
+suppressMessages(library(rvest))
+suppressMessages(library(fs))
 
-DATE <- "2020-05-01"
-LANGUAGE <- "sv"
-BASE_OUTPUT_PATH <- "/tmp"
+argv <- commandArgs(trailingOnly = TRUE)
 
+if(length(argv) != 3) {
+  stop("Usage: RScript scraper_articles.R DATE LANGUAGE OUTPUT_PATH")
+}
+
+DATE <- argv[1] # "2020-05-01"
+LANGUAGE <- argv[2] # "sv"
+BASE_OUTPUT_PATH <- argv[3] # "/tmp"
+
+## String template for search results URL
 emm.url.template <- function(i, from, to=from, language="all", page.language="en")
   str_c("https://emm.newsbrief.eu/NewsBrief/dynamic",
         "?language=", page.language,
@@ -37,6 +44,7 @@ emm.url.template <- function(i, from, to=from, language="all", page.language="en
         "&dateTo=", to,
         "&lang=", language)
 
+## String templates for output file names
 general.file.template <- function(type, i, from, to=from, language="all") {
   date_block <- if(from == to) from else str_c(from, "--", to)
   file_name <- str_c(type, "-", language, "-", date_block, "-", curr_page, ".csv.gz")
@@ -52,23 +60,33 @@ entities.file.template <- function(i, from, to=from, language="all")
 categories.file.template <- function(i, from, to=from, language="all")
   general.file.template("categories", i, from, to, language)
 
-get_page_count <- function(doc)
+## x %>% f  === f(x)
+## x %>% f %>% g === g(f(x))
+
+## Extract page count from document/DOM
+get_page_count <- function(doc) {
   doc %>%
     html_node(xpath="//input[@name = 'page_count']") %>%
     html_attr("value") %>%
     as.numeric()
+}
 
-get_current_page <- function(doc)
+## Extract current page from documnet/DOM
+get_current_page <- function(doc) {
   doc %>%
     html_node(xpath="//input[@name = 'current_page']") %>%
     html_attr("value") %>%
     as.numeric()
+}
 
-has_class <- function(tags, cls)
+## Predicate that is TRUE If tags has (CSS) class cls
+has_class <- function(tags, cls) {
   tags %>%
     html_attr("class") %>%
     str_detect(str_c("(^| )", cls, "( |$)"))
+}
 
+## Parses 'category' annotations in doc
 parse_categories <- function(doc) {
   doc %>%
     html_nodes(xpath="./a[starts-with(@href, '/NewsBrief/alertedition')]") %>%
@@ -77,15 +95,23 @@ parse_categories <- function(doc) {
     magrittr::extract(,2)
 }
 
+## Parses 'entity' annotations in doc
 parse_entities <- function(doc) {
-  doc %>%
-    html_nodes(xpath="./a[starts-with(@href, '/NewsBrief/entityedition')]") %>%
+  entity.nodes <- doc %>%
+    html_nodes(xpath="./a[starts-with(@href, '/NewsBrief/entityedition')]")
+
+  entity.ids <- entity.nodes %>%
     html_attr("href") %>%
     str_match("/NewsBrief/entityedition/[a-zA-Z0-9]+/([0-9]+)\\.html") %>%
-    magrittr::extract(,2) %>%
+    magrittr::extract(,2) %>% ## [,2]
     as.integer()
+
+  entity.names <- entity.nodes %>% html_text()
+
+  tibble(id = entity.ids, name = entity.names)
 }
 
+## Parses one search results page
 parse_page <- function(doc) {
   article.nodes <- doc %>%
     html_nodes(xpath="/html/body/div[contains(@class, 'articlebox_big')]")
@@ -146,6 +172,7 @@ parse_page <- function(doc) {
   list(articles=articles, entities=entities, categories=categories)
 }
 
+## Write results to file
 dump_parsed <- function(i, parse_results) {
   write_csv(parse_results$articles,
             articles.file.template(i, DATE, language=LANGUAGE))
@@ -164,7 +191,7 @@ page <- read_html(emm.url.template(1, DATE, language=LANGUAGE))
 page_count <- get_page_count(page)
 curr_page <- get_current_page(page)
 
-max_page_count <- 500
+max_page_count <- 5
 
 if(page_count != 0) {
   print(curr_page)
