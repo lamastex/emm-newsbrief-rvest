@@ -175,11 +175,13 @@ parse_page <- function(doc) {
 ## Write results to file
 dump_parsed <- function(i, parse_results) {
   write_csv(parse_results$articles,
-            articles.file.template(i, DATE, language=LANGUAGE))
+            articles.file.template(i, DATE, language=LANGUAGE), col_names = FALSE)
   write_csv(parse_results$entities,
-            entities.file.template(i, DATE, language=LANGUAGE))
-  write_csv(parse_results$categories, categories.file.template(i, DATE))
+            entities.file.template(i, DATE, language=LANGUAGE), col_names = FALSE)
+  write_csv(parse_results$categories, categories.file.template(i, DATE), col_names = FALSE)
 }
+
+## ACTUAL PROGRAM
 
 page <- read_html(emm.url.template(1, DATE, language=LANGUAGE))
 
@@ -191,7 +193,8 @@ page <- read_html(emm.url.template(1, DATE, language=LANGUAGE))
 page_count <- get_page_count(page)
 curr_page <- get_current_page(page)
 
-max_page_count <- 5
+# Maximum number of pages to download
+max_page_count <- Inf
 
 if(page_count != 0) {
   print(curr_page)
