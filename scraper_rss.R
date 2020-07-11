@@ -62,7 +62,7 @@ get_text <- function(field)
   rss.item.nodes %>% xml_node(xpath=str_c("./", field)) %>% xml_text()
 
 get_attr <- function(field, attr)
-  rss.item.nodes %>% xml_node(xpath=str_c("./", field)) %>% xml_attr(attr),
+  rss.item.nodes %>% xml_node(xpath=str_c("./", field)) %>% xml_attr(attr)
 
 items <- tibble(title             = get_text("title"),
                 link              = get_text("link"),
@@ -119,3 +119,4 @@ categories.file.template <- general.file.template("categories")
 write_csv(     items, path=articles.file.template)
 write_csv(  entities, path=entities.file.template)
 write_csv(categories, path=categories.file.template)
+print(articles.file.template)
