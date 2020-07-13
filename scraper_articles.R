@@ -34,6 +34,7 @@ if(length(argv) != 3) {
 DATE <- argv[1] # "2020-05-01"
 LANGUAGE <- argv[2] # "sv"
 BASE_OUTPUT_PATH <- argv[3] # "/tmp"
+VERBOSE <- FALSE
 
 ## String template for search results URL
 emm.url.template <- function(i, from, to=from, language="all", page.language="en")
@@ -48,7 +49,7 @@ emm.url.template <- function(i, from, to=from, language="all", page.language="en
 ## String templates for output file names
 general.file.template <- function(type, i, from, to=from, language="all") {
   date_block <- if(from == to) from else str_c(from, "--", to)
-  file_name <- str_c(type, "-", language, "-", date_block, "-", curr_page, ".csv.gz")
+  file_name <- str_c(type, "-", language, "-", date_block, "-", i, ".csv.gz")
   fs::path(BASE_OUTPUT_PATH, file_name)
 }
 
@@ -146,7 +147,7 @@ parse_page <- function(doc) {
     html_node(xpath="./a[1]") %>%
     html_text()
 
-  weekday.pattern <- "(Monday|Tuesday|Wendsday|Thursday|Friday|Saturday|Sunday)"
+  weekday.pattern <- "(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
   month.pattern <- "(January|February|March|April|May|June|July|August|September|October|November|December)"
   day.of.month.pattern <- "[0-9]{1,2}"
   year.pattern <- "(19|20)[0-9]{2}"
@@ -163,6 +164,10 @@ parse_page <- function(doc) {
 
   datetime.timezones <- datetime.strings %>%
     str_extract("[A-Z]{1,6}$")
+
+  if(VERBOSE) {
+    print(datetime.timezones)
+  }
 
   published <- force_tzs(datetime.no_timezone, datetime.timezones)
   original_timezone <- datetime.timezones
@@ -201,14 +206,29 @@ parse_page <- function(doc) {
 }
 
 ## Write results to file
-dump_parsed <- function(i, parse_results, merged=FALSE) {
+dump_parsed <- function(i, parse_results, merged=FALSE, appended=FALSE) {
+  if(appended) {
+    i <- "all"
+  }
   if(!merged) {
-    write_csv(parse_results$articles,
-              articles.file.template(i, DATE, language=LANGUAGE))
-    write_csv(parse_results$entities,
-              entities.file.template(i, DATE, language=LANGUAGE))
-    write_csv(parse_results$categories, categories.file.template(i, DATE))
+    articles.file   <-   articles.file.template(i, DATE, language=LANGUAGE)
+    entities.file   <-   entities.file.template(i, DATE, language=LANGUAGE)
+    categories.file <- categories.file.template(i, DATE, language=LANGUAGE)
+    articles.exists   <-   file.exists(articles.file)
+    entities.exists   <-   file.exists(entities.file)
+    categories.exists <- file.exists(categories.file)
+    write_csv(parse_results$articles, articles.file,
+              col_names=!(appended & articles.exists),
+              append=appended)
+    write_csv(parse_results$entities, entities.file,
+              col_names=!(appended & entities.exists),
+              append=appended)
+    write_csv(parse_results$categories, categories.file,
+              col_names=!(appended & categories.exists),
+              append=appended)
   } else {
+    merged.file <- merged.file.template(i, DATE, language=LANGUAGE)
+    already.exists <- file.exists(merged.file)
     collapsed.entities <- parse_results$entities %>%
       group_by(url) %>%
       summarise(entity_ids = str_c(id, collapse = ";"),
@@ -219,7 +239,8 @@ dump_parsed <- function(i, parse_results, merged=FALSE) {
     parse_results$articles %>%
       left_join(collapsed.entities, by="url") %>%
       left_join(collapsed.categories, by="url") %>%
-      write_csv(merged.file.template(i, DATE, language=LANGUAGE))
+      write_csv(merged.file, col_names = !(appended & already.exists),
+                append=appended)
   }
 }
 
@@ -233,24 +254,25 @@ page <- read_html(emm.url.template(1, DATE, language=LANGUAGE))
 page_count <- get_page_count(page)
 curr_page <- get_current_page(page)
 
-max_page_count <- 5
+max_page_count <- Inf
 
 if(page_count != 0) {
-  print(curr_page)
-  dump_parsed(curr_page, parse_page(page), merged=TRUE)
+  if(VERBOSE) {
+    print(curr_page)
+  }
+  dump_parsed(curr_page, parse_page(page), merged=TRUE, appended=TRUE)
 } else {
   warning("No search results!")
 }
 
 while(page_count == -1 && curr_page <= max_page_count) {
   page <- read_html(emm.url.template(curr_page + 1, DATE, language=LANGUAGE))
-  print(curr_page + 1)
+  if(VERBOSE) {
+    print(curr_page + 1)
+  }
   page_count <- get_page_count(page)
   curr_page <- get_current_page(page)
   ##
-  dump_parsed(curr_page, parse_page(page), merged=TRUE)
+  dump_parsed(curr_page, parse_page(page), merged=TRUE, appended=TRUE)
 }
-
-
-## search_page <- read_html("https://emm.newsbrief.eu/NewsBrief/search/en/advanced.html")
 
