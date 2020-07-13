@@ -23,6 +23,7 @@ suppressMessages(library(magrittr))
 suppressMessages(library(tidyverse))
 suppressMessages(library(rvest))
 suppressMessages(library(fs))
+suppressMessages(library(lubridate))
 
 argv <- commandArgs(trailingOnly = TRUE)
 
@@ -33,6 +34,7 @@ if(length(argv) != 3) {
 DATE <- argv[1] # "2020-05-01"
 LANGUAGE <- argv[2] # "sv"
 BASE_OUTPUT_PATH <- argv[3] # "/tmp"
+VERBOSE <- FALSE
 
 ## String template for search results URL
 emm.url.template <- function(i, from, to=from, language="all", page.language="en")
@@ -47,7 +49,7 @@ emm.url.template <- function(i, from, to=from, language="all", page.language="en
 ## String templates for output file names
 general.file.template <- function(type, i, from, to=from, language="all") {
   date_block <- if(from == to) from else str_c(from, "--", to)
-  file_name <- str_c(type, "-", language, "-", date_block, "-", curr_page, ".csv.gz")
+  file_name <- str_c(type, "-", language, "-", date_block, "-", i, ".csv.gz")
   fs::path(BASE_OUTPUT_PATH, file_name)
 }
 
@@ -59,6 +61,9 @@ entities.file.template <- function(i, from, to=from, language="all")
 
 categories.file.template <- function(i, from, to=from, language="all")
   general.file.template("categories", i, from, to, language)
+
+merged.file.template <- function(i, from, to=from, language="all")
+  general.file.template("merged-articles", i, from, to, language)
 
 ## x %>% f  === f(x)
 ## x %>% f %>% g === g(f(x))
@@ -106,7 +111,9 @@ parse_entities <- function(doc) {
     magrittr::extract(,2) %>% ## [,2]
     as.integer()
 
-  entity.names <- entity.nodes %>% html_text()
+  entity.names <- entity.nodes %>% html_text() %>%
+    str_replace_all("$[^[:alpha:]]*", "") %>%
+    str_replace_all("[^[:alpha:]]*$", "")
 
   tibble(id = entity.ids, name = entity.names)
 }
@@ -140,6 +147,31 @@ parse_page <- function(doc) {
     html_node(xpath="./a[1]") %>%
     html_text()
 
+  weekday.pattern <- "(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
+  month.pattern <- "(January|February|March|April|May|June|July|August|September|October|November|December)"
+  day.of.month.pattern <- "[0-9]{1,2}"
+  year.pattern <- "(19|20)[0-9]{2}"
+  date.pattern <- str_c(month.pattern, " ", day.of.month.pattern, ", ", year.pattern)
+  time.pattern <- "1?[0-9]:[0-5][0-9]:[0-5][0-9] (A|P)M [A-Z]{1,6}"
+  datetime.pattern <- str_c(weekday.pattern, ", ", date.pattern, " ", time.pattern)
+
+  datetime.strings <- headline.source.nodes %>%
+    html_text() %>%
+    str_extract(datetime.pattern)
+
+  datetime.no_timezone <- datetime.strings %>%
+    parse_date_time(orders="A, B d, Y I:M:S p")
+
+  datetime.timezones <- datetime.strings %>%
+    str_extract("[A-Z]{1,6}$")
+
+  if(VERBOSE) {
+    print(datetime.timezones)
+  }
+
+  published <- force_tzs(datetime.no_timezone, datetime.timezones)
+  original_timezone <- datetime.timezones
+
   leadin.nodes <- article.nodes %>%
     html_node(xpath="./p[contains(@class, 'center_leadin')]")
 
@@ -160,8 +192,9 @@ parse_page <- function(doc) {
     html_node(xpath="./p[contains(@class, 'center_also') and starts-with(., 'Other categories:')]") %>%
     map(parse_categories)
 
-  articles <- tibble(source.name, source.country,
-                     is.duplicate, url, url.language, leadin, leadin.language)
+  articles <- tibble(source.name, source.country, is.duplicate, url,
+                     url.language, published, original_timezone, leadin,
+                     leadin.language)
 
   entities <- tibble(url = url, entity = entity.lists) %>%
     unnest(one_of("entity"))
@@ -173,12 +206,42 @@ parse_page <- function(doc) {
 }
 
 ## Write results to file
-dump_parsed <- function(i, parse_results) {
-  write_csv(parse_results$articles,
-            articles.file.template(i, DATE, language=LANGUAGE), col_names = FALSE)
-  write_csv(parse_results$entities,
-            entities.file.template(i, DATE, language=LANGUAGE), col_names = FALSE)
-  write_csv(parse_results$categories, categories.file.template(i, DATE), col_names = FALSE)
+dump_parsed <- function(i, parse_results, merged=FALSE, appended=FALSE) {
+  if(appended) {
+    i <- "all"
+  }
+  if(!merged) {
+    articles.file   <-   articles.file.template(i, DATE, language=LANGUAGE)
+    entities.file   <-   entities.file.template(i, DATE, language=LANGUAGE)
+    categories.file <- categories.file.template(i, DATE, language=LANGUAGE)
+    articles.exists   <-   file.exists(articles.file)
+    entities.exists   <-   file.exists(entities.file)
+    categories.exists <- file.exists(categories.file)
+    write_csv(parse_results$articles, articles.file,
+              col_names=!(appended & articles.exists),
+              append=appended)
+    write_csv(parse_results$entities, entities.file,
+              col_names=!(appended & entities.exists),
+              append=appended)
+    write_csv(parse_results$categories, categories.file,
+              col_names=!(appended & categories.exists),
+              append=appended)
+  } else {
+    merged.file <- merged.file.template(i, DATE, language=LANGUAGE)
+    already.exists <- file.exists(merged.file)
+    collapsed.entities <- parse_results$entities %>%
+      group_by(url) %>%
+      summarise(entity_ids = str_c(id, collapse = ";"),
+                entity_names= str_c(name, collapse=";"), .groups="drop_last")
+    collapsed.categories <- parse_results$categories %>%
+      group_by(url) %>%
+      summarise(categories = str_c(category, collapse=";"), .groups="drop_last")
+    parse_results$articles %>%
+      left_join(collapsed.entities, by="url") %>%
+      left_join(collapsed.categories, by="url") %>%
+      write_csv(merged.file, col_names = !(appended & already.exists),
+                append=appended)
+  }
 }
 
 ## ACTUAL PROGRAM
@@ -193,25 +256,25 @@ page <- read_html(emm.url.template(1, DATE, language=LANGUAGE))
 page_count <- get_page_count(page)
 curr_page <- get_current_page(page)
 
-# Maximum number of pages to download
 max_page_count <- Inf
 
 if(page_count != 0) {
-  print(curr_page)
-  dump_parsed(curr_page, parse_page(page))
+  if(VERBOSE) {
+    print(curr_page)
+  }
+  dump_parsed(curr_page, parse_page(page), merged=TRUE, appended=TRUE)
 } else {
   warning("No search results!")
 }
 
 while(page_count == -1 && curr_page <= max_page_count) {
   page <- read_html(emm.url.template(curr_page + 1, DATE, language=LANGUAGE))
-  print(curr_page + 1)
+  if(VERBOSE) {
+    print(curr_page + 1)
+  }
   page_count <- get_page_count(page)
   curr_page <- get_current_page(page)
   ##
-  dump_parsed(curr_page, parse_page(page))
+  dump_parsed(curr_page, parse_page(page), merged=TRUE, appended=TRUE)
 }
-
-
-## search_page <- read_html("https://emm.newsbrief.eu/NewsBrief/search/en/advanced.html")
 
