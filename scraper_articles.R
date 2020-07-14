@@ -275,6 +275,8 @@ while(page_count == -1 && curr_page <= max_page_count) {
   page_count <- get_page_count(page)
   curr_page <- get_current_page(page)
   ##
-  dump_parsed(curr_page, parse_page(page), merged=TRUE, appended=TRUE)
+  if(page_count > -3) {
+    dump_parsed(curr_page, parse_page(page), merged=TRUE, appended=TRUE)
+  }
 }
 
