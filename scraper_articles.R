@@ -118,8 +118,11 @@ parse_entities <- function(doc) {
   tibble(id = entity.ids, name = entity.names)
 }
 
+normalise_string <- function(str)
+  str_trim(str_replace_all(str, "\\s+", " "))
+
 ## Parses one search results page
-parse_page <- function(doc) {
+parse_page <- function(doc, normalise_strings = FALSE) {
   article.nodes <- doc %>%
     html_nodes(xpath="/html/body/div[contains(@class, 'articlebox_big')]")
 
@@ -202,6 +205,12 @@ parse_page <- function(doc) {
   categories <- tibble(url = url, category = category.lists) %>%
     unnest(one_of("category"))
 
+  if(normalise_strings) {
+    articles   <-   articles %>% mutate_if(is.character, normalise_string)
+    entities   <-   entities %>% mutate_if(is.character, normalise_string)
+    categories <- categories %>% mutate_if(is.character, normalise_string)
+  }
+
   list(articles=articles, entities=entities, categories=categories)
 }
 
@@ -244,9 +253,29 @@ dump_parsed <- function(i, parse_results, merged=FALSE, appended=FALSE) {
   }
 }
 
-## ACTUAL PROGRAM
+read_html_retry <- function(..., max_retries=10, wait_time=2, wait_increment=2) {
+  page <- NA
+  while(is.na(page) & max_retries > 0) {
+    page <- tryCatch(
+      expr={
+        read_html(emm.url.template(1, DATE, language=LANGUAGE))
+      },
+      error=function(e) {
+        warning(e)
+        warning(str_c("Retries remaining: ", max_retries))
+        max_retries <<- max_retries - 1
+        Sys.sleep(wait_time)
+        wait_time <<- wait_time + wait_increment
+        NA
+      })
+  }
+  if(!is.na(page))
+    page
+  else
+    stop("Failed after max_retries")
+}
 
-page <- read_html(emm.url.template(1, DATE, language=LANGUAGE))
+page <- read_html_retry(emm.url.template(1, DATE, language=LANGUAGE))
 
 ## Theory:
 ## page_count ==  0 if no search results
@@ -262,21 +291,27 @@ if(page_count != 0) {
   if(VERBOSE) {
     print(curr_page)
   }
-  dump_parsed(curr_page, parse_page(page), merged=TRUE, appended=TRUE)
+  dump_parsed(curr_page,
+              parse_page(page, normalise_strings=TRUE),
+              merged=TRUE,
+              appended=TRUE)
 } else {
   warning("No search results!")
 }
 
 while(page_count == -1 && curr_page <= max_page_count) {
-  page <- read_html(emm.url.template(curr_page + 1, DATE, language=LANGUAGE))
+  page <- read_html_retry(emm.url.template(curr_page + 1, DATE, language=LANGUAGE))
   if(VERBOSE) {
     print(curr_page + 1)
   }
   page_count <- get_page_count(page)
-  curr_page <- get_current_page(page)
+  curr_page  <- get_current_page(page)
   ##
   if(page_count > -3) {
-    dump_parsed(curr_page, parse_page(page), merged=TRUE, appended=TRUE)
+    dump_parsed(curr_page,
+                parse_page(page, normalise_strings=TRUE),
+                merged=TRUE,
+                appended=TRUE)
   }
 }
 
