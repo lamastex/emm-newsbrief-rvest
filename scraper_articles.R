@@ -258,9 +258,10 @@ read_html_retry <- function(..., max_retries=10, wait_time=2, wait_increment=2) 
   while(is.na(page) & max_retries > 0) {
     page <- tryCatch(
       expr={
-        read_html(emm.url.template(1, DATE, language=LANGUAGE))
+        read_html(...)
       },
       error=function(e) {
+	warning(list(...))
         warning(e)
         warning(str_c("Retries remaining: ", max_retries))
         max_retries <<- max_retries - 1
